@@ -14,6 +14,7 @@ const { computeRotation } = require('./rotation');
 const { normalizeAbsenceRules, computeAbsenceRotation } = require('./absence');
 const { computeRouting } = require('./routing');
 const { computePassageAdvice } = require('./passage-advice');
+const { computeClosureImpact } = require('./closure');
 
 const app = express();
 app.use(express.json());
@@ -653,6 +654,35 @@ app.get('/api/routing/advice', (req, res) => {
     replayResult.results
   );
   res.json(advice);
+});
+
+/* ---------- 换景通道临时封闭影响评估（只读，不写通道或提示） ----------
+ * 查询参数 a、b 指定一条**现有**通道（端点无序，自动规范化）。系统先取得
+ * 现状逐组线路，再**仅在内存中**移除该通道，对全部生效提示重新做整组联合
+ * 寻路（端点不连通 / 通道争用 / 路径规模上限语义与 /api/routing 一致，遇上
+ * 限显示未计算）。只有原本可行、封闭后不可行的提示计为新增阻断；原有无解
+ * 提示单独标明。全程只读：不新增 / 修改 / 删除任何通道或提示。
+ */
+app.get('/api/routing/closure', (req, res) => {
+  const a = String(req.query.a || '').trim();
+  const b = String(req.query.b || '').trim();
+  if (!a || !b) return bad(res, '请用查询参数 a、b 指定要临时封闭的通道两端区位');
+  if (a === b) return bad(res, '通道的两个端点不能是同一区位（自环通道不存在）');
+  const [x, y] = a < b ? [a, b] : [b, a];
+  if (!db.prepare('SELECT 1 FROM passages WHERE loc_a = ? AND loc_b = ?').get(x, y))
+    return bad(res, `「${x}」与「${y}」之间不存在通道，无法评估封闭影响`, 404);
+
+  const { locations, props, cues } = loadBaseData();
+  const passages = loadPassages();
+  const replayResult = replay(locations, props, cues);
+  const impact = computeClosureImpact(
+    locations,
+    passages.map((p) => ({ loc_a: p.a, loc_b: p.b })),
+    cues,
+    replayResult.results,
+    { a: x, b: y }
+  );
+  res.json(impact);
 });
 
 /* ---------- 临时缺席试排（不写库） ----------

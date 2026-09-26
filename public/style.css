@@ -565,6 +565,24 @@ button:disabled { opacity: .55; cursor: wait; }
 /* 卡片标题中的多个跳转链接 */
 .header-links { display: inline-flex; gap: 10px; float: right; }
 
+/* 换景通道临时封闭影响评估 */
+#closure-form select { min-width: 240px; }
+.badge.clo-warn {
+  background: rgba(224, 164, 88, .14);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.rt2-alert.warn { border-color: var(--accent); border-left-color: var(--accent); background: rgba(224, 164, 88, .07); }
+.rt2-alert.warn strong { color: var(--accent); }
+.clo-summary { margin: 4px 0 12px; }
+.clo-summary .sum-ok { color: var(--ok); }
+.clo-summary .sum-lack { color: var(--err); }
+.clo-summary .sum-skip { color: var(--muted); }
+.clo-cue .pv-sides { margin-top: 8px; }
+.clo-cue .rt2-routes { margin-top: 6px; }
+.clo-cue .cue-errors { margin-top: 6px; }
+.clo-cue .rt2-contention { margin-top: 6px; }
+
 /* 通道增设建议 */
 #advice-run { min-width: 260px; }
 .adv-found-banner { line-height: 1.9; }
