@@ -591,3 +591,11 @@ button:disabled { opacity: .55; cursor: wait; }
   color: var(--muted);
 }
 .adv-scope strong { color: var(--text); }
+
+/* 通道临时封闭影响评估 */
+#closure-form select { min-width: 240px; }
+#closure-panel .sum-ok { color: var(--ok); }
+#closure-panel .sum-lack { color: var(--err); }
+#closure-panel .sum-skip { color: var(--muted); }
+.closure-cue .pv-side .badge { display: inline-block; margin-bottom: 6px; }
+.closure-cue .pv-side .rt2-routes { margin-top: 2px; }

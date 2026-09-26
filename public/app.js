@@ -226,6 +226,7 @@ function render() {
   renderPassages();
   renderRouting();
   clearAdviceResult();
+  renderClosureForm();
 }
 
 /* ---------- 换景人员与逐提示岗位表 ---------- */
@@ -1381,45 +1382,32 @@ function routePathHtml(rt) {
     </div>`;
 }
 
-function routingGroupHtml(g) {
+/* 规划组状态徽章（⑫ 逐组卡片与 ⑭ 封闭前后对比两侧共用） */
+function routingStatusBadgeHtml(g) {
+  if (g.status === 'ok')
+    return `<span class="badge ok">✓ 规划可行（${g.routes.length} 条转移，路径两两不共边）</span>`;
+  if (g.status === 'disconnected')
+    return '<span class="badge fail">✗ 端点不连通</span>';
+  if (g.status === 'limited')
+    return '<span class="badge fail">⚠ 未计算（路径规模超限）</span>';
+  return '<span class="badge fail">✗ 通道争用</span>';
+}
+
+/* 规划组内容：完整线路 / 不连通清单 / 争用簇 / 超限说明（不含卡片头） */
+function routingBodyHtml(g) {
   if (g.status === 'ok') {
-    const routes = g.routes.map(routePathHtml).join('');
-    return `
-      <div class="cue-item ok rt2-group">
-        <div class="cue-head">
-          <span class="num">提示 ${g.number}</span>
-          <span class="note">${esc(g.note || '')}</span>
-          <span class="badge ok">✓ 规划可行（${g.routes.length} 条转移，路径两两不共边）</span>
-        </div>
-        <div class="rt2-routes">${routes}</div>
-      </div>`;
+    return `<div class="rt2-routes">${g.routes.map(routePathHtml).join('')}</div>`;
   }
 
   if (g.status === 'disconnected') {
     const lines = g.disconnected
       .map((d) => `<li>「${esc(d.prop)}」：${esc(d.from)} <span class="arrow">→</span> ${esc(d.to)}（两端区位在通道图上不连通，无论其他转移怎么走都无路可达）</li>`)
       .join('');
-    return `
-      <div class="cue-item fail rt2-group">
-        <div class="cue-head">
-          <span class="num">提示 ${g.number}</span>
-          <span class="note">${esc(g.note || '')}</span>
-          <span class="badge fail">✗ 端点不连通</span>
-        </div>
-        <ul class="cue-errors"><li>下列转移的来源与目标区位之间不存在任何通道路径，请在 ⑪ 中补建通道：</li>${lines}</ul>
-      </div>`;
+    return `<ul class="cue-errors"><li>下列转移的来源与目标区位之间不存在任何通道路径，请在 ⑪ 中补建通道：</li>${lines}</ul>`;
   }
 
   if (g.status === 'limited') {
-    return `
-      <div class="cue-item fail rt2-group">
-        <div class="cue-head">
-          <span class="num">提示 ${g.number}</span>
-          <span class="note">${esc(g.note || '')}</span>
-          <span class="badge fail">⚠ 未计算（路径规模超限）</span>
-        </div>
-        <ul class="cue-errors"><li>${esc(g.limited ? g.limited.message : '简单路径枚举量超过上限')}</li></ul>
-      </div>`;
+    return `<ul class="cue-errors"><li>${esc(g.limited ? g.limited.message : '简单路径枚举量超过上限')}</li></ul>`;
   }
 
   // contention：通道争用，按极小不可行子集（争用簇）列出受影响转移
@@ -1441,18 +1429,39 @@ function routingGroupHtml(g) {
     ? '<p class="hint">（转移组合规模超过诊断枚举上限，已退化为把全部转移列为受影响）</p>'
     : '';
   return `
-    <div class="cue-item fail rt2-group">
+    <ul class="cue-errors">
+      <li>每条转移的端点各自都有通道可达，但<strong>不存在一组互不共边的路径</strong>——系统已联合搜索并允许各转移改走绕行路径（非逐条固定最短路），仍无法排开；受影响转移如下，可在 ⑪ 中为争用通道补建平行通道：</li>
+    </ul>
+    <div class="rt2-contention">${clusters}</div>
+    ${truncNote}`;
+}
+
+function routingGroupHtml(g) {
+  return `
+    <div class="cue-item ${g.status === 'ok' ? 'ok' : 'fail'} rt2-group">
       <div class="cue-head">
         <span class="num">提示 ${g.number}</span>
         <span class="note">${esc(g.note || '')}</span>
-        <span class="badge fail">✗ 通道争用</span>
+        ${routingStatusBadgeHtml(g)}
       </div>
-      <ul class="cue-errors">
-        <li>每条转移的端点各自都有通道可达，但<strong>不存在一组互不共边的路径</strong>——系统已联合搜索并允许各转移改走绕行路径（非逐条固定最短路），仍无法排开；受影响转移如下，可在 ⑪ 中为争用通道补建平行通道：</li>
-      </ul>
-      <div class="rt2-contention">${clusters}</div>
-      ${truncNote}
+      ${routingBodyHtml(g)}
     </div>`;
+}
+
+/* 无解组的受影响转移一览（预警条用）：「道具」来源→目标 */
+function routingAffectedText(g) {
+  if (g.status === 'disconnected')
+    return g.disconnected.map((d) => `「${esc(d.prop)}」${esc(d.from)}→${esc(d.to)}`).join('、');
+  if (g.status === 'contention') {
+    const affected = new Map();
+    (g.contention.clusters || []).forEach((c) =>
+      c.transfers.forEach((t) => affected.set(t.index, t))
+    );
+    return [...affected.values()]
+      .map((t) => `「${esc(t.prop)}」${esc(t.from)}→${esc(t.to)}`)
+      .join('、');
+  }
+  return '';
 }
 
 function renderRouting() {
@@ -1490,21 +1499,11 @@ function renderRouting() {
   } else {
     alertsEl.innerHTML = problemGroups
       .map((g) => {
-        if (g.status === 'disconnected') {
-          const props = g.disconnected.map((d) => `「${esc(d.prop)}」${esc(d.from)}→${esc(d.to)}`).join('、');
-          return `<div class="rt2-alert disc"><strong>提示 ${g.number} · 端点不连通</strong><span>${props}</span></div>`;
-        }
-        if (g.status === 'limited') {
+        if (g.status === 'disconnected')
+          return `<div class="rt2-alert disc"><strong>提示 ${g.number} · 端点不连通</strong><span>${routingAffectedText(g)}</span></div>`;
+        if (g.status === 'limited')
           return `<div class="rt2-alert"><strong>提示 ${g.number} · 路径规模超限未计算</strong></div>`;
-        }
-        const affected = new Map();
-        (g.contention.clusters || []).forEach((c) =>
-          c.transfers.forEach((t) => affected.set(t.index, t))
-        );
-        const props = [...affected.values()]
-          .map((t) => `「${esc(t.prop)}」${esc(t.from)}→${esc(t.to)}`)
-          .join('、');
-        return `<div class="rt2-alert cont"><strong>提示 ${g.number} · 通道争用</strong><span>${props}</span></div>`;
+        return `<div class="rt2-alert cont"><strong>提示 ${g.number} · 通道争用</strong><span>${routingAffectedText(g)}</span></div>`;
       })
       .join('');
   }
@@ -1630,6 +1629,142 @@ $('#advice-run').addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = '🧩 生成通道增设建议（不写通道）';
+  }
+});
+
+/* ---------- 通道临时封闭影响评估（仅内存评估，不删通道、不改提示） ---------- */
+
+let closureSelected = ''; // 当前选中的通道（JSON [a, b] 字符串）；通道消失后自动清空
+
+function renderClosureForm() {
+  const sel = $('#closure-passage');
+  if (!sel) return;
+  const passages = state.passages || [];
+  sel.innerHTML = ['<option value="">选择要临时封闭的现有通道…</option>']
+    .concat(
+      passages.map((p) => {
+        const v = JSON.stringify([p.a, p.b]);
+        return `<option value="${esc(v)}" ${v === closureSelected ? 'selected' : ''}>${esc(p.a)} — ${esc(p.b)}</option>`;
+      })
+    )
+    .join('');
+  // 所选通道被删除（或随区位删除被连带清理）后，选择失效
+  if (closureSelected && !passages.some((p) => JSON.stringify([p.a, p.b]) === closureSelected))
+    closureSelected = '';
+  sel.value = closureSelected;
+  // 区位 / 通道 / 提示一有变化，旧评估结果即过期，自动清空
+  clearClosureResult();
+}
+
+function clearClosureResult() {
+  const panel = $('#closure-panel');
+  if (!panel) return;
+  panel.classList.add('hidden');
+  panel.innerHTML = '';
+}
+
+const CLOSURE_CHANGE_BADGES = {
+  still_ok: '<span class="badge ok">✓ 封闭后仍可行</span>',
+  newly_blocked: '<span class="badge fail">✗ 新增阻断（原本可行，封闭后不可行）</span>',
+  already_broken: '<span class="badge skip">— 原有无解（非本次封闭造成）</span>',
+  baseline_limited: '<span class="badge fail">⚠ 现状未计算（路径规模超限）</span>',
+  closure_limited: '<span class="badge fail">⚠ 封闭后未计算（路径规模超限）</span>',
+};
+
+function closureGroupHtml(entry) {
+  return `
+    <div class="pv-cue closure-cue">
+      <div class="pv-cue-head">
+        <span class="num">提示 ${entry.number}</span>
+        <span class="note">${esc(entry.note || '')}</span>
+        ${CLOSURE_CHANGE_BADGES[entry.change] || ''}
+      </div>
+      <div class="pv-sides">
+        <div class="pv-side">
+          <div class="pv-side-label">封闭前 · 现状线路</div>
+          ${routingStatusBadgeHtml(entry.before)}${routingBodyHtml(entry.before)}
+        </div>
+        <div class="pv-arrow">→</div>
+        <div class="pv-side">
+          <div class="pv-side-label">封闭后 · 内存中移除该通道</div>
+          ${routingStatusBadgeHtml(entry.after)}${routingBodyHtml(entry.after)}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderClosureResult(data) {
+  const panel = $('#closure-panel');
+  const head = `<div class="pv-title">🚧 通道临时封闭影响评估 · 假设封闭「${esc(data.closed.a)} — ${esc(data.closed.b)}」（仅内存评估：通道未删除、提示未改动）</div>`;
+
+  if (data.status === 'empty') {
+    panel.innerHTML = `${head}<p class="hint">当前没有任何整组生效的提示，没有需要评估封闭影响的线路（失败提示不参与）。</p>`;
+    panel.classList.remove('hidden');
+    return;
+  }
+
+  const s = data.summary;
+  const summaryLine =
+    `共对 <strong>${s.total}</strong> 条重放生效提示逐组对比` +
+    (data.skippedCueCount ? `（${data.skippedCueCount} 条失败提示不参与）` : '') +
+    `：<span class="sum-ok">${s.stillOk} 组封闭后仍可行</span> · ` +
+    `<span class="sum-lack">${s.newlyBlocked} 组新增阻断</span> · ` +
+    `<span class="sum-skip">${s.alreadyBroken} 组原有无解（单独标明，非本次封闭造成）</span>` +
+    (s.limited ? ` · <span class="sum-lack">${s.limited} 组未计算（路径规模超限）</span>` : '') +
+    `。`;
+
+  // 新增阻断预警条：只有「原本可行、封闭后不可行」的提示才计入
+  const blocked = data.groups.filter((g) => g.change === 'newly_blocked');
+  const banner = blocked.length
+    ? blocked
+        .map((g) => {
+          const reason = g.after.status === 'disconnected' ? '端点不连通' : '通道争用';
+          return `<div class="rt2-alert ${g.after.status === 'disconnected' ? 'disc' : 'cont'}"><strong>提示 ${g.number} · 新增阻断（封闭后${reason}）</strong><span>${routingAffectedText(g.after)}</span></div>`;
+        })
+        .join('')
+    : `<div class="rt2-banner-ok">✓ 封闭该通道<strong>不会造成新增阻断</strong>：原本可行的 ${s.stillOk} 组提示在封闭后均可取得互不共边的线路${s.alreadyBroken ? `（另有 ${s.alreadyBroken} 组原本就无解，与本次封闭无关，下方单独标明）` : ''}。</div>`;
+
+  panel.innerHTML = `
+    ${head}
+    <p class="hint closure-summary">${summaryLine}</p>
+    ${banner}
+    <h4>逐提示封闭前后对比（封闭前现状线路 → 封闭后重算线路）</h4>
+    ${data.groups.map(closureGroupHtml).join('')}`;
+  panel.classList.remove('hidden');
+}
+
+function renderClosureError(msg) {
+  const panel = $('#closure-panel');
+  panel.innerHTML = `<div class="pv-title">🚧 通道临时封闭影响评估</div><div class="pv-error">${esc(msg)}</div>`;
+  panel.classList.remove('hidden');
+}
+
+// 换一条通道评估时，旧结果即失效
+$('#closure-passage').addEventListener('change', (e) => {
+  closureSelected = e.target.value;
+  clearClosureResult();
+});
+
+$('#closure-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!closureSelected) {
+    renderClosureError('请先选择一条要临时封闭的现有通道');
+    return;
+  }
+  const [a, b] = JSON.parse(closureSelected);
+  const btn = $('#closure-run');
+  btn.disabled = true;
+  btn.textContent = '评估中…';
+  try {
+    const res = await fetch(`/api/routing/closure?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+    const data = await res.json();
+    if (!res.ok) renderClosureError(data.error || '评估失败');
+    else renderClosureResult(data);
+  } catch (err) {
+    renderClosureError('无法连接服务器');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🚧 评估临时封闭影响（不删通道）';
   }
 });
 
